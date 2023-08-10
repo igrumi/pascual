@@ -34,6 +34,7 @@ def get_unsplash_image(keyword):
     else:
         return None
 
+#on_ready event XD!
 @bot.event
 async def on_ready():
     print(f'We have logged in as {bot.user}')
