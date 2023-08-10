@@ -18,6 +18,7 @@ intents.dm_messages = True
 intents.guild_messages = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+#Close people list for certain commands
 close = [710679721859612682]
 
 # Fetch a random image from Unsplash using the given keyword
