@@ -1,2 +1,4 @@
 # .gitignore
 .env
+keyword_responses.json
+__pycache__/

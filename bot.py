@@ -1,15 +1,17 @@
 import discord
 import os
 import random
-import aiohttp
 import requests
-import wavelink
 from dotenv import load_dotenv
 from discord.ext import commands
 from discord import app_commands
+from functions import process_message
+from file_operations import load_keyword_responses, update_keyword_responses
 
 #Loads up the environment variables from .env file
 load_dotenv()
+keyword_responses = load_keyword_responses()
+
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
@@ -21,11 +23,11 @@ intents.guilds = True  # Enable guild (server) join and leave events
 intents.members = True  # Enable member-related events
 intents.dm_messages = True
 intents.guild_messages = True
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='!!', intents=intents)
 
+owner_id = 146187721252143104
 #Close people list for certain commands
 close = [710679721859612682]
-
 
 # Fetch a random image from Unsplash using the given keyword
 def get_unsplash_image(keyword):
@@ -81,9 +83,55 @@ async def on_guild_join(guild):
     else:
         print('Alert channel not found in the main guild.')
 
+@bot.command()
+async def say(ctx: commands.Context, *, prompt: str):
+  print(f"Message sent: {ctx.message.content}")
+  msg = prompt
+  await ctx.message.delete()
+  await ctx.send(f"{msg}")
+
+@bot.tree.command(name="get_image", description="Get an image based on the keyword you give.")
+async def get_image(interaction: discord.Interaction, *, prompt: str):
+  print(f"Message sent: {prompt}")
+  try:
+    keyword = prompt  # Replace with the keyword for the image
+    image_url = get_unsplash_image(keyword)
+    print(image_url)
+    if image_url:
+      result_msg = f"Result for: `{keyword}`"
+
+      embed = discord.Embed(title=result_msg, color=discord.Color.pink())
+      embed.set_image(url=image_url)
+      await interaction.response.send_message(embed=embed)
+      #await interaction.response.send_message(f"{result_msg}" + image_url)
+    else:
+      await interaction.response.send_message(f"no images found for keyword: `{keyword}`")
+  except Exception as e:
+    # Check if you are in the server
+    bot_owner = await bot.fetch_user(owner_id)
+    guild = interaction.guild
+
+    if guild and bot_owner in guild.members:
+        # You are in the server, so ping you
+        await interaction.response.send_message(f"<@{bot_owner.id}> An error occurred: {str(e)}")
+    else:
+        # You are not in the server, send a different message
+        await interaction.response.send_message(f"An error occurred, DM {bot_owner.name} for help.")
+
+
+@bot.command()
+async def pascual(ctx: commands.Context):
+  keyword = "siamese cat"  # Replace with the keyword for the image
+  image_url = get_unsplash_image(keyword)
+
+  if image_url:
+    await ctx.send(image_url)
+  else:
+    await ctx.send('Cagó la API')
+
 @bot.tree.command(name="ola", description="paskualin te saluda, ke mejor")
 async def hello(interaction: discord.Interaction):
-  await interaction.response.send_message(f"hey {interaction.user.mention}!", ephemeral= True)
+  await interaction.response.send_message(f"ola {interaction.user.mention}!", ephemeral= True)
 
 @bot.tree.command(name="roll", description="Roll a number between 0 and 100")
 async def roll(interaction: discord.Interaction, limit: int = 100):
@@ -99,133 +147,100 @@ async def roll(interaction: discord.Interaction, limit: int = 100):
 
     await interaction.response.send_message(embed=embed)
 
+@bot.tree.command(name="add_keyword_slash", description="Add or update a keyword response")
+async def add_keyword_slash(interaction: discord.Interaction, keyword: str, user_id: str, random_flag: int, response_type: str="text", *, response_content: str):
+    if interaction.user.id != owner_id:
+        await interaction.response.send_message("Only the owner can use this command.", ephemeral=True)
+        return
+    
+    user_id = int(user_id)
+    # Convert random_flag from 1 or 2 to True or False
+    random_flag = random_flag == 1
+
+    # Check if the keyword already exists in the dictionary
+    if keyword in keyword_responses:
+      if keyword_responses[keyword]['random']:
+          # If random is True, append the response to the list
+          keyword_responses[keyword]['responses'].append(response_content)
+      else:
+          # Update the entry as before for random=False
+          keyword_responses[keyword].update({
+              'user_id': user_id,
+              'random': random_flag,
+              'type': response_type,
+              'content': response_content if response_type == 'text' else None,
+              'emoji': response_content if response_type == 'emoji' else None,
+              'gif_url': response_content if response_type == 'gif' else None,
+              'responses': []  # Initialize an empty list for responses
+          })
+    else:
+        # If the keyword doesn't exist, create a new entry
+        keyword_responses[keyword] = {
+            'user_id': user_id,
+            'random': random_flag,
+            'type': response_type,
+            'content': response_content if response_type == 'text' else None,
+            'emoji': response_content if response_type == 'emoji' else None,
+            'gif_url': response_content if response_type == 'gif' else None,
+            'responses': []  # Initialize an empty list for responses
+        }
+
+    # Call the update_keyword_responses function to save the changes
+    update_keyword_responses(keyword_responses)
+
+    embed = discord.Embed(title= f"Added/updated the `{keyword}` keyword response!",
+                          description=f"User ID: {user_id}\n"
+                                      f"Random: {random_flag}\n"
+                                      f"Type: {response_type}\n"
+                                      f"Content: {response_content}", 
+                                      color=discord.Color.pink())
+    await interaction.response.send_message(embed=embed)
+    #await interaction.response.send_message(f"Keyword '{keyword}' added/updated with the following response:\n"
+    #               f"User ID: {user_id}\n"
+    #               f"Random: {random_flag}\n"
+    #               f"Type: {response_type}\n"
+    #               f"Content: {response_content}")
+
+@bot.tree.command(name="remove_keyword", description="Remove a keyword from the dictionary.")
+async def remove_keyword_slash(interaction: discord.Interaction, keyword: str):
+    if interaction.user.id != owner_id:
+        await interaction.response.send_message("Only the owner can use this command.", ephemeral=True)
+        return
+    # Check if the keyword exists in the dictionary
+    if keyword in keyword_responses:
+        # Remove the keyword from the dictionary
+        del keyword_responses[keyword]
+        # Save the updated dictionary to the JSON file
+        update_keyword_responses(keyword_responses)
+        embed = discord.Embed(title=f"Keyword `{keyword}` has been removed and the changes have been saved.", color= discord.Color.pink())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        await interaction.response.send_message(f"Keyword '{keyword}' was not found in the dictionary.", ephemeral=True)
+
 @bot.event
 async def on_message(message):
   if message.author == bot.user:
     return
 
-  if message.author.id in close:
-    if 'kodol' in message.content.lower():
-      print(f"Message content: {message.content}")
-      print(f"Author ID: {message.author.id}")
-      user_id = os.getenv("KODOL")
-      gif = 'https://tenor.com/view/siamese-cat-siamese-cutecats-kitten-kitty-gif-24959894'
-      responses = [
-        f'<@{user_id}> mi mamita hermosa bonita',
-        f'<@{user_id}> fokiu mother .l.',
-        f'<@{user_id}> mira mother literalmente yo {gif} '
-      ]
-      random_response = random.choice(responses)
-      await message.channel.send(random_response)
+  #if message.author.id in close:
+  #  if 'kodol' in message.content.lower():
+  #    print(f"Message content: {message.content}")
+  #    print(f"Author ID: {message.author.id}")
+  #    user_id = os.getenv("KODOL")
+  #    gif = 'https://tenor.com/view/siamese-cat-siamese-cutecats-kitten-kitty-gif-24959894'
+  #    responses = [
+  #      f'<@{user_id}> mi mamita hermosa bonita',
+  #      f'<@{user_id}> fokiu mother .l.',
+  #      f'<@{user_id}> mira mother literalmente yo {gif} '
+  #    ]
+  #    random_response = random.choice(responses)
+  #    await message.channel.send(random_response)
 
-    elif 'kasueler' in message.content.lower():
-      response = 'fokiu father .l.'
-      await message.channel.send(response)
+  #  elif 'kasueler' in message.content.lower():
+  #    response = 'fokiu father .l.'
+  #    await message.channel.send(response)
 
-  if 'pascual' in message.content.lower():
-    keyword = "siamese cat"  # Replace with the keyword for the image
-    image_url = get_unsplash_image(keyword)
-
-    if image_url:
-      await message.channel.send(image_url)
-    else:
-      await message.channel.send('Cagó la API')
-
-  if 'yelo' in message.content.lower():
-    user_id = 146361216044892160  # Mention the user who sent the message
-    custom_emoji = '<:hoal:1138915980727296181>'  # Replace with your custom emoji
-    response = f"<@{user_id}> {custom_emoji}{custom_emoji}{custom_emoji}"
-    await message.channel.send(response)
-
-  if 'panda' in message.content.lower():
-    user_id = 345694254649180161  # Mention the user who sent the message
-    custom_emoji = '<:floppy:1138916037887275178>'  # Replace with your custom emoji
-    response = f"<@{user_id}> chupalo panda {custom_emoji}"
-    await message.channel.send(response)
-
-  if 'neicho' in message.content.lower():
-    print(f"Message content: {message.content}")
-    print(f"Author ID: {message.author.id}")
-    user_id = 435217891579920386
-    await message.channel.send(f"<@{user_id}> deranker desgraciao")
-
-  if 'bichota' in message.content.lower():
-    print(f"Message content: {message.content}")
-    print(f"Author ID: {message.author.id}")
-    user_id = 529061870553006084
-    await message.channel.send(f"<@{user_id}> WOOTINISTA")
-
-  if 'vintage' in message.content.lower():
-    print(f"Message content: {message.content}")
-    print(f"Author ID: {message.author.id}")
-    user_id = 549235628332810261
-    if user_id:
-      await message.channel.send(f"<@{user_id}> merami")
-    else:
-      await message.channel.send(f"{user_id} not found!")
-
-  if 'bufos' in message.content.lower():
-    print(f"Message content: {message.content}")
-    print(f"Author ID: {message.author.id}")
-    user_id = 969009500583505950
-    await message.channel.send(f"<@{user_id}>")
-    await message.channel.send(
-      f"https://tenor.com/view/ferret-bath-gif-18303106")
-
-  if 'akemi' in message.content.lower():
-    print(f"Message content: {message.content}")
-    print(f"Author ID: {message.author.id}")
-    user_id = 699079977748135936
-    await message.channel.send(f"<@{user_id}> que te follen ijo deperra")
-
-  if 'daqo' in message.content.lower():
-    print(f"Message content: {message.content}")
-    print(f"Author ID: {message.author.id}")
-    user_id = 209051034318929920
-    await message.channel.send(f"<@{user_id}> que te follen")
-
-  if 'pupi' in message.content.lower():
-    print(f"Message content: {message.content}")
-    print(f"Author ID: {message.author.id}")
-    custom_emoji = '<:floppy:1138916037887275178>'
-    user_id = 158009300092977153
-    await message.channel.send(f"<@{user_id}> {custom_emoji}")
-    await message.channel.send(f"{custom_emoji}")
-    await message.channel.send(f"{custom_emoji}")
-    await message.channel.send(f"{custom_emoji}")
-    await message.channel.send(f"{custom_emoji}")
-
-  if 'neicho' in message.content.lower():
-    print(f"Message content: {message.content}")
-    print(f"Author ID: {message.author.id}")
-    user_id = 435217891579920386
-    await message.channel.send(f"<@{user_id}> que te follen")
-
-  if 'nesumi' in message.content.lower():
-    print(f"Message content: {message.content}")
-    print(f"Author ID: {message.author.id}")
-    user_id = 774506123696144444
-    await message.channel.send(f"<@{user_id}> que te follen")
-
-  if 'xeb' in message.content.lower():
-    print(f"Message content: {message.content}")
-    print(f"Author ID: {message.author.id}")
-    user_id = 415593324083150848
-    await message.channel.send(f"<@{user_id}> que te follen")
-
-  if 'pogon' in message.content.lower():
-    print(f"Message content: {message.content}")
-    print(f"Author ID: {message.author.id}")
-    user_id = 814643903709446184
-    await message.channel.send(f"<@{user_id}> que te follen")
-
-  if 'makipro' in message.content.lower():
-    print(f"Message content: {message.content}")
-    print(f"Author ID: {message.author.id}")
-    user_id = 541049717870821425
-    await message.channel.send(f"<@{user_id}> que te follen")
-
-  await bot.process_commands(message)
+  await process_message(message, keyword_responses, bot)
 
 if __name__ == '__main__':
   bot.run(TOKEN)
