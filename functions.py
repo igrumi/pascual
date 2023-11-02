@@ -1,15 +1,21 @@
 import random
+import datetime
 
+ts = datetime.datetime.now()
 async def handle_custom_response(message, response):
     print(f"\nMessage content: {message.content}")
     print(f"Server: {message.guild.name}")
-    print(f"Author ID: {message.author.id}")
+    print(f"Author: {message.author.name}")
+    print(f"Timestamp: {ts}")
 
     # Get the guild where the command was invoked
     guild = message.guild
 
     # Check if the user with user_id is a member of the guild
     user = guild.get_member(response['user_id'])
+    role = guild.get_role(response['user_id'])
+    
+    
 
     if user:
         response_type = response.get('type', 'text')
@@ -43,8 +49,22 @@ async def handle_custom_response(message, response):
         elif response_type == 'textmoji':
             await message.channel.send(f"<@{response['user_id']}> {response['content']} {response['emoji']}")
 
+    elif role:
+        response_type = response.get('type', 'text')
+        if response.get('random', False):
+            responses = response.get('responses', [])
+            if responses:
+                random_response = random.choice(responses)
+                await message.channel.send(f"<@&{response['user_id']}> {random_response}")
+            else:
+                await message.channel.send(f"<@&{response['user_id']}> No responses defined.")
+
+        elif response_type == 'gifrole':
+            await message.channel.send(f"<@&{response['user_id']}>")
+            await message.channel.send(response['gif_url'])
+
     else:
-        await message.channel.send(f"User to ping not found in the server")
+        print(f"User to ping not found in the server")
 
 async def process_message(message, keyword_responses, bot):
     # Check if the message content contains any of the specified keywords
