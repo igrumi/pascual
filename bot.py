@@ -2,8 +2,6 @@ import discord
 import os
 import random
 import requests
-import datetime
-import asyncio
 from dotenv import load_dotenv
 from discord.ext import commands, tasks
 from discord import app_commands
